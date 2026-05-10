@@ -1,0 +1,22 @@
+[
+  {
+    "text": "We delivered record revenue and expect continued strong growth next quarter.",
+    "expected_direction": "positive"
+  },
+  {
+    "text": "We face significant headwinds from rising input costs and supply chain disruptions.",
+    "expected_direction": "negative"
+  },
+  {
+    "text": "Results were broadly in line with our guidance for the quarter.",
+    "expected_direction": "positive"
+  },
+  {
+    "text": "We achieved all-time highs in operating margin and will continue to invest in growth.",
+    "expected_direction": "positive"
+  },
+  {
+    "text": "Demand deteriorated sharply and we expect losses to widen in the coming quarters.",
+    "expected_direction": "negative"
+  }
+]

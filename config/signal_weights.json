@@ -1,0 +1,9 @@
+{
+  "management_confidence_shift": 0.25,
+  "laggard_signal": 0.20,
+  "guidance_gap": 0.20,
+  "dso_trend": 0.12,
+  "inventory_velocity": 0.10,
+  "segment_mix_shift": 0.08,
+  "analyst_target_gap": 0.05
+}

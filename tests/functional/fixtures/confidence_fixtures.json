@@ -1,0 +1,22 @@
+[
+  {
+    "text": "We will achieve our targets and commit to delivering a $2B buyback. We expect revenue to grow 15% and will expand margins through disciplined cost management.",
+    "expected_min": 0.6,
+    "description": "assertive-heavy"
+  },
+  {
+    "text": "We believe we might see some improvement but assume caution is warranted. We could face headwinds and may not achieve our initial targets. We hope the environment stabilizes.",
+    "expected_max": 0.35,
+    "description": "hedge-heavy"
+  },
+  {
+    "text": "",
+    "expected_fallback": 0.5,
+    "description": "empty input returns neutral fallback"
+  },
+  {
+    "text": "The quarter was productive with steady performance across all segments.",
+    "expected_range": [0.0, 1.0],
+    "description": "neutral text returns value in valid range"
+  }
+]

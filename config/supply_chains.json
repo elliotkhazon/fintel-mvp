@@ -1,0 +1,27 @@
+{
+  "NVDA": {
+    "suppliers": ["TSM", "ASML", "AMAT", "LRCX"],
+    "customers": ["MSFT", "GOOGL", "META", "AMZN", "ORCL"],
+    "competitors": ["AMD", "INTC"]
+  },
+  "AMD": {
+    "suppliers": ["TSM", "ASML"],
+    "customers": ["MSFT", "GOOGL", "META"],
+    "competitors": ["NVDA", "INTC"]
+  },
+  "AAPL": {
+    "suppliers": ["TSM", "QCOM", "AVGO", "SNPS"],
+    "customers": [],
+    "competitors": ["GOOGL", "MSFT", "SMSNG"]
+  },
+  "MSFT": {
+    "suppliers": ["NVDA", "AMD", "INTC"],
+    "customers": [],
+    "competitors": ["GOOGL", "AMZN", "ORCL"]
+  },
+  "GOOGL": {
+    "suppliers": ["NVDA", "TSM", "AVGO"],
+    "customers": [],
+    "competitors": ["MSFT", "META", "AMZN"]
+  }
+}

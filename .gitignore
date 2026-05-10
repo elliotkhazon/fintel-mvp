@@ -1,0 +1,11 @@
+etl-env/
+data/
+docs/
+prompts/
+miscl/
+.env
+__pycache__/
+.pytest_cache/
+report.txt
+.last_run_id
+/notebook/.ipynb_checkpoints
