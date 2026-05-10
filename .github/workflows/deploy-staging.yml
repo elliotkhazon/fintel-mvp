@@ -1,0 +1,77 @@
+name: Deploy — Staging
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  terraform-apply:
+    runs-on: ubuntu-latest
+    if: vars.FINTEL_WORKFLOWS_ENABLED == 'true'
+    environment: staging
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      transcripts_bucket: ${{ steps.outputs.outputs.bucket }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/fintel-ci-staging-role
+          aws-region: us-east-1
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "1.8" }
+      - name: Init + Apply
+        run: |
+          terraform -chdir=infra init \
+            -backend-config="bucket=fintel-tf-state-staging" \
+            -backend-config="key=fintel-mvp/staging.tfstate" \
+            -backend-config="dynamodb_table=fintel-tf-locks-staging"
+          terraform -chdir=infra apply -var-file="envs/staging.tfvars" -auto-approve
+      - id: outputs
+        run: echo "bucket=$(terraform -chdir=infra output -raw transcripts_bucket)" >> "$GITHUB_OUTPUT"
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    if: vars.FINTEL_WORKFLOWS_ENABLED == 'true'
+    needs: terraform-apply
+    environment: staging
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      FINTEL_ENV: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/fintel-ci-staging-role
+          aws-region: us-east-1
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
+      - name: Integration tests
+        run: pytest tests/integration/ -v --tb=short -m "not slow"
+
+  regression-tests:
+    runs-on: ubuntu-latest
+    if: vars.FINTEL_WORKFLOWS_ENABLED == 'true'
+    needs: integration-tests
+    environment: staging
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      FINTEL_ENV: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/fintel-ci-staging-role
+          aws-region: us-east-1
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
+      - name: Regression tests
+        run: pytest tests/regression/ -v --tb=short

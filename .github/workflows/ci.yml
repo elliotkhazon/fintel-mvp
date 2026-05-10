@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  terraform-validate:
+    runs-on: ubuntu-latest
+    if: vars.FINTEL_WORKFLOWS_ENABLED == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "1.8" }
+      - name: Fmt check
+        run: terraform -chdir=infra fmt -check -recursive
+      - name: Validate
+        run: |
+          terraform -chdir=infra init -backend=false
+          terraform -chdir=infra validate
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    if: vars.FINTEL_WORKFLOWS_ENABLED == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
+      - run: pytest tests/unit/ -v --tb=short
+
+  terraform-plan-staging:
+    runs-on: ubuntu-latest
+    if: vars.FINTEL_WORKFLOWS_ENABLED == 'true'
+    needs: [terraform-validate]
+    environment: staging
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/fintel-ci-staging-role
+          aws-region: us-east-1
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "1.8" }
+      - name: Init + Plan
+        run: |
+          terraform -chdir=infra init \
+            -backend-config="bucket=fintel-tf-state-staging" \
+            -backend-config="key=fintel-mvp/staging.tfstate" \
+            -backend-config="dynamodb_table=fintel-tf-locks-staging"
+          terraform -chdir=infra plan -var-file="envs/staging.tfvars" -no-color

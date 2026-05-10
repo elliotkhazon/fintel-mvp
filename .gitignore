@@ -1,4 +1,7 @@
 etl-env/
+**/.terraform/
+**/.terraform.lock.hcl
+**/tfplan
 data/
 docs/
 prompts/

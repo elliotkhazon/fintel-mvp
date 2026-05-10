@@ -1,0 +1,73 @@
+name: Deploy — Production
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  terraform-plan-prod:
+    runs-on: ubuntu-latest
+    if: vars.FINTEL_WORKFLOWS_ENABLED == 'true'
+    environment: prod
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/fintel-ci-prod-role
+          aws-region: us-east-1
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "1.8" }
+      - name: Init + Plan (review before apply)
+        run: |
+          terraform -chdir=infra init \
+            -backend-config="bucket=fintel-tf-state-prod" \
+            -backend-config="key=fintel-mvp/prod.tfstate" \
+            -backend-config="dynamodb_table=fintel-tf-locks-prod"
+          terraform -chdir=infra plan -var-file="envs/prod.tfvars" -no-color
+
+  terraform-apply-prod:
+    runs-on: ubuntu-latest
+    if: vars.FINTEL_WORKFLOWS_ENABLED == 'true'
+    needs: terraform-plan-prod
+    environment: prod          # GitHub environment requires manual approval here
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/fintel-ci-prod-role
+          aws-region: us-east-1
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: "1.8" }
+      - name: Apply
+        run: |
+          terraform -chdir=infra init \
+            -backend-config="bucket=fintel-tf-state-prod" \
+            -backend-config="key=fintel-mvp/prod.tfstate" \
+            -backend-config="dynamodb_table=fintel-tf-locks-prod"
+          terraform -chdir=infra apply -var-file="envs/prod.tfvars" -auto-approve
+
+  smoke-tests:
+    runs-on: ubuntu-latest
+    if: vars.FINTEL_WORKFLOWS_ENABLED == 'true'
+    needs: terraform-apply-prod
+    environment: prod
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/fintel-ci-prod-role
+          aws-region: us-east-1
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt
+      - run: pytest tests/integration/ -v -m "smoke" --tb=short
