@@ -87,14 +87,14 @@ async def get_company_graph(ticker: str):
 async def get_signals(ticker: str, quarter: int = 1, year: int = 2024):
     """Compute the 7-signal bundle without generating a narrative report."""
     db = await get_db()
-    hop1, hop2, km, segs, at, guidance = await asyncio.gather(
-        hop1_sentiment(db, ticker),
-        hop2_competitor_signals(db, ticker),
-        fetch_key_metrics_history(db, ticker),
-        fetch_segments(db, ticker),
-        fetch_analyst_targets(db, ticker),
-        fetch_guidance(db, ticker, quarter, year),
-    )
+    # Sequential queries — surrealdb async_ws client has a race condition with
+    # concurrent queries sharing one connection (KeyError on qry dict).
+    hop1     = await hop1_sentiment(db, ticker)
+    hop2     = await hop2_competitor_signals(db, ticker)
+    km       = await fetch_key_metrics_history(db, ticker)
+    segs     = await fetch_segments(db, ticker)
+    at       = await fetch_analyst_targets(db, ticker)
+    guidance = await fetch_guidance(db, ticker, quarter, year)
     return compute_signals(
         symbol=ticker.upper(),
         quarter=quarter,

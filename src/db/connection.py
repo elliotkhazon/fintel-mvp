@@ -9,12 +9,14 @@ URL resolution priority:
 
 from __future__ import annotations
 
+import asyncio
 import os
 
 from surrealdb import AsyncSurreal
 from surrealdb.connections.async_ws import AsyncWsSurrealConnection
 
 _db: AsyncWsSurrealConnection | None = None
+_lock = asyncio.Lock()
 
 
 def _resolve_url() -> str:
@@ -29,18 +31,20 @@ def _resolve_url() -> str:
 async def get_db() -> AsyncWsSurrealConnection:
     """Return the shared SurrealDB client, connecting on first call."""
     global _db
-    if _db is None:
-        url = _resolve_url()
-        _db = AsyncSurreal(url)
-        await _db.connect()
-        await _db.signin({
-            "username": os.getenv("SURREAL_USER", "root"),
-            "password": os.getenv("SURREAL_PASS", "root"),
-        })
-        await _db.use(
-            os.getenv("SURREAL_NS", "fintel"),
-            os.getenv("SURREAL_DB", "earnings_model"),
-        )
+    async with _lock:
+        if _db is None:
+            url = _resolve_url()
+            conn = AsyncSurreal(url)
+            await conn.connect()
+            await conn.signin({
+                "username": os.getenv("SURREAL_USER", "root"),
+                "password": os.getenv("SURREAL_PASS", "root"),
+            })
+            await conn.use(
+                os.getenv("SURREAL_NS", "fintel"),
+                os.getenv("SURREAL_DB", "earnings_model"),
+            )
+            _db = conn  # only assigned after full authenticated setup
     return _db
 
 

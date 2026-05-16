@@ -118,7 +118,7 @@ async def fetch_key_metrics_history(
     sql = """
         SELECT period, dso, inventory_turnover, revenue_per_share, gross_profit_margin
         FROM key_metric_snapshot
-        WHERE company = type::thing('company', $ticker_slug)
+        WHERE company = type::record('company', $ticker_slug)
         ORDER BY period DESC
         LIMIT $n
     """
@@ -134,7 +134,7 @@ async def fetch_segments(
     sql = """
         SELECT period, segment_name, revenue, pct_of_total
         FROM revenue_segment
-        WHERE company = type::thing('company', $ticker_slug)
+        WHERE company = type::record('company', $ticker_slug)
         ORDER BY period DESC
         LIMIT $n
     """
@@ -149,7 +149,7 @@ async def fetch_analyst_targets(
     sql = """
         SELECT target_consensus, target_high, target_low, target_median, fetched_at
         FROM analyst_target
-        WHERE company = type::thing('company', $ticker_slug)
+        WHERE company = type::record('company', $ticker_slug)
         ORDER BY fetched_at DESC
         LIMIT 1
     """

@@ -30,3 +30,8 @@ def ecr_client():
 @pytest.fixture(scope="session")
 def ec2_client():
     return boto3.client("ec2", region_name=REGION)
+
+
+@pytest.fixture(scope="session")
+def ssm_client():
+    return boto3.client("ssm", region_name=REGION)

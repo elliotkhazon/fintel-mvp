@@ -14,6 +14,10 @@ output "ecr_repo_url" {
   value = aws_ecr_repository.fintel.repository_url
 }
 
+output "la_ecr_repo_url" {
+  value = aws_ecr_repository.la_engine.repository_url
+}
+
 output "gemini_secret_arn" {
   value = aws_secretsmanager_secret.gemini_api_key.arn
 }

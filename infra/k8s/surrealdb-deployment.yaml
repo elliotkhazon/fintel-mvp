@@ -1,0 +1,74 @@
+# SurrealDB single-replica deployment.
+# hostPort: 8000 exposes SurrealDB on the EC2 host IP so AgentCore (outside k3s)
+# can connect at <ec2_private_ip>:8000 — allowed by sg-k3s ingress rule (VPC CIDR).
+# In-cluster consumers (FastAPI pod) use the ClusterIP service instead.
+#
+# Credentials are injected from the k8s Secret "surrealdb-creds", which is
+# created by user_data.sh.tpl from the fintel/surrealdb-creds Secrets Manager secret.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: surrealdb
+  labels:
+    app: surrealdb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: surrealdb
+  template:
+    metadata:
+      labels:
+        app: surrealdb
+    spec:
+      containers:
+      - name: surrealdb
+        image: surrealdb/surrealdb:2
+        args:
+          - start
+          - --log=info
+          - --user=$(SURREAL_USER)
+          - --pass=$(SURREAL_PASS)
+          - file:///data/fintel.db
+        ports:
+        - name: surreal
+          containerPort: 8000
+          hostPort: 8000
+        env:
+        - name: SURREAL_USER
+          valueFrom:
+            secretKeyRef:
+              name: surrealdb-creds
+              key: user
+        - name: SURREAL_PASS
+          valueFrom:
+            secretKeyRef:
+              name: surrealdb-creds
+              key: pass
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+          limits:
+            cpu: "1000m"
+            memory: "1536Mi"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          failureThreshold: 3
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: surrealdb-pvc

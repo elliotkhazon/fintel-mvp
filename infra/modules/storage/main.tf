@@ -64,7 +64,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "transcripts" {
   }
 }
 
-# ── ECR Repository ────────────────────────────────────────────────────────────
+# ── ECR Repositories ──────────────────────────────────────────────────────────
 
 resource "aws_ecr_repository" "fintel" {
   name                 = "fintel-mvp"
@@ -88,6 +88,36 @@ resource "aws_ecr_lifecycle_policy" "fintel" {
         tagStatus   = "any"
         countType   = "imageCountMoreThan"
         countNumber = 10
+      }
+      action = { type = "expire" }
+    }]
+  })
+}
+
+# LA Engine GPU container image — separate from the main app image so lifecycle
+# policies and IAM pull permissions can be scoped independently
+resource "aws_ecr_repository" "la_engine" {
+  name                 = "fintel-la-engine"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = { Name = "fintel-la-engine" }
+}
+
+resource "aws_ecr_lifecycle_policy" "la_engine" {
+  repository = aws_ecr_repository.la_engine.name
+
+  policy = jsonencode({
+    rules = [{
+      rulePriority = 1
+      description  = "Keep last 5 LA Engine images"
+      selection = {
+        tagStatus   = "any"
+        countType   = "imageCountMoreThan"
+        countNumber = 5
       }
       action = { type = "expire" }
     }]

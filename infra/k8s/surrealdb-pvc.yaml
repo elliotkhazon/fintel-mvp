@@ -1,0 +1,27 @@
+# PersistentVolume backed by the EBS gp3 volume mounted at /mnt/surrealdb-data
+# by user_data.sh.tpl. storageClassName is empty string to bypass dynamic provisioning.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: surrealdb-pv
+spec:
+  capacity:
+    storage: 18Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  hostPath:
+    path: /mnt/surrealdb-data
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: surrealdb-pvc
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 18Gi
+  storageClassName: ""
+  volumeName: surrealdb-pv

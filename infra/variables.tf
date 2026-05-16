@@ -27,6 +27,12 @@ variable "availability_zones" {
   default = ["us-east-1a", "us-east-1b"]
 }
 
+variable "public_subnet_cidr" {
+  type        = string
+  default     = "10.0.3.0/24"
+  description = "CIDR for the public subnet that hosts the NAT Gateway"
+}
+
 variable "ec2_instance_type" {
   type    = string
   default = "t3.medium"

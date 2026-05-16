@@ -1,0 +1,15 @@
+# ClusterIP service — used by FastAPI pod (in-cluster) to reach SurrealDB.
+# DNS: surrealdb.default.svc.cluster.local:8000
+# External access (AgentCore) goes through hostPort on the EC2 private IP instead.
+apiVersion: v1
+kind: Service
+metadata:
+  name: surrealdb
+spec:
+  selector:
+    app: surrealdb
+  ports:
+  - name: surreal
+    port: 8000
+    targetPort: 8000
+  type: ClusterIP

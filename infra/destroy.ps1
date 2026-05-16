@@ -19,10 +19,12 @@ if ($Confirm -ne $Env) {
 
 # Targets must match modules declared in main.tf. Expand this list as phases are added.
 # module.storage is intentionally excluded to preserve S3 buckets and Secrets Manager secrets.
+# module.k3s destroys the EC2 and EBS volume — snapshot the EBS first in prod if needed.
 Write-Host "==> Running terraform destroy (module.storage excluded - data preserved)"
 terraform -chdir=infra destroy -var-file="$Vars" -auto-approve `
     "-target=module.networking" `
-    "-target=module.iam"
+    "-target=module.iam" `
+    "-target=module.k3s"
 if (-not $?) { exit 1 }
 
 Write-Host "==> Destroy complete."

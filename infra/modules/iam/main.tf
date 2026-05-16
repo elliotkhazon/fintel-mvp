@@ -67,6 +67,7 @@ resource "aws_iam_role_policy" "ci_terraform" {
           "ecr:*",
           "secretsmanager:*",
           "iam:*",
+          "ssm:*",
           "bedrock:*",
           "glue:*",
           "sagemaker:*",
@@ -80,6 +81,8 @@ resource "aws_iam_role_policy" "ci_terraform" {
 }
 
 # ── EC2 Role (k3s node — Phase 2) ────────────────────────────────────────────
+# AmazonSSMManagedInstanceCore lets operators use SSM Session Manager and
+# deploy.ps1 to run post-deploy commands without a bastion or public IP.
 
 resource "aws_iam_role" "ec2" {
   name = "fintel-ec2-role-${var.env}"
@@ -99,8 +102,13 @@ resource "aws_iam_instance_profile" "ec2" {
   role = aws_iam_role.ec2.name
 }
 
+resource "aws_iam_role_policy_attachment" "ec2_ssm" {
+  role       = aws_iam_role.ec2.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
 resource "aws_iam_role_policy" "ec2_policy" {
-  name = "fintel-ec2-policy"
+  name = "fintel-ec2-policy-${var.env}"
   role = aws_iam_role.ec2.id
 
   policy = jsonencode({
@@ -120,7 +128,11 @@ resource "aws_iam_role_policy" "ec2_policy" {
       {
         Sid    = "SecretsRead"
         Effect = "Allow"
-        Action = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:PutSecretValue"
+        ]
         Resource = "arn:aws:secretsmanager:${local.region}:${local.account_id}:secret:fintel/*"
       },
       {
@@ -135,12 +147,14 @@ resource "aws_iam_role_policy" "ec2_policy" {
         Resource = "arn:aws:logs:${local.region}:${local.account_id}:log-group:/fintel/*"
       },
       {
-        Sid    = "S3TranscriptsRead"
+        Sid    = "S3Read"
         Effect = "Allow"
         Action = ["s3:GetObject", "s3:ListBucket"]
         Resource = [
           "arn:aws:s3:::fintel-transcripts-${var.env}",
-          "arn:aws:s3:::fintel-transcripts-${var.env}/*"
+          "arn:aws:s3:::fintel-transcripts-${var.env}/*",
+          "arn:aws:s3:::fintel-artifacts-${var.env}",
+          "arn:aws:s3:::fintel-artifacts-${var.env}/*"
         ]
       }
     ]

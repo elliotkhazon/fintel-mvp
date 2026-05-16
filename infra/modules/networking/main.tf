@@ -1,5 +1,3 @@
-# VPC — private only, no Internet Gateway, no NAT Gateway.
-# All AWS service traffic routes through VPC endpoints below.
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
@@ -50,6 +48,16 @@ resource "aws_security_group" "k3s" {
   tags = { Name = "fintel-k3s-${var.env}" }
 }
 
+resource "aws_security_group_rule" "k3s_ssh_eic" {
+  type              = "ingress"
+  description       = "SSH via EC2 Instance Connect Endpoint"
+  from_port         = 22
+  to_port           = 22
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
+  security_group_id = aws_security_group.k3s.id
+}
+
 resource "aws_security_group" "endpoints" {
   name        = "fintel-endpoints-${var.env}"
   description = "VPC Interface endpoints: HTTPS inbound from VPC"
@@ -73,11 +81,60 @@ resource "aws_security_group" "endpoints" {
   tags = { Name = "fintel-endpoints-${var.env}" }
 }
 
-# ── Route table (private subnets) ─────────────────────────────────────────────
+# ── Internet Gateway + NAT Gateway ───────────────────────────────────────────
+
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+  tags   = { Name = "fintel-igw-${var.env}" }
+}
+
+resource "aws_subnet" "public" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = var.public_subnet_cidr
+  availability_zone       = var.availability_zones[0]
+  map_public_ip_on_launch = false
+
+  tags = { Name = "fintel-public-1-${var.env}" }
+}
+
+resource "aws_eip" "nat" {
+  domain = "vpc"
+  tags   = { Name = "fintel-nat-eip-${var.env}" }
+}
+
+resource "aws_nat_gateway" "main" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public.id
+  tags          = { Name = "fintel-nat-${var.env}" }
+
+  depends_on = [aws_internet_gateway.main]
+}
+
+# ── Route tables ──────────────────────────────────────────────────────────────
+
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+  tags   = { Name = "fintel-public-rt-${var.env}" }
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }
+}
+
+resource "aws_route_table_association" "public" {
+  subnet_id      = aws_subnet.public.id
+  route_table_id = aws_route_table.public.id
+}
 
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
   tags   = { Name = "fintel-private-rt-${var.env}" }
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.main.id
+  }
 }
 
 resource "aws_route_table_association" "private" {
@@ -144,4 +201,51 @@ resource "aws_vpc_endpoint" "logs" {
   private_dns_enabled = true
 
   tags = { Name = "fintel-logs-${var.env}" }
+}
+
+# SSM — Session Manager and Run Command from private instances.
+# Three endpoints are required: ssm (control plane), ssmmessages (session data), ec2messages (Run Command).
+# k3s installs nftables rules that block outbound HTTPS to public IPs, so NAT-based SSM does not work.
+# VPC endpoints stay within 10.x.x.x (VPC CIDR) and bypass nftables, so they are required.
+resource "aws_vpc_endpoint" "ssm" {
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.${var.aws_region}.ssm"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = aws_subnet.private[*].id
+  security_group_ids  = [aws_security_group.endpoints.id]
+  private_dns_enabled = true
+
+  tags = { Name = "fintel-ssm-${var.env}" }
+}
+
+resource "aws_vpc_endpoint" "ssmmessages" {
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.${var.aws_region}.ssmmessages"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = aws_subnet.private[*].id
+  security_group_ids  = [aws_security_group.endpoints.id]
+  private_dns_enabled = true
+
+  tags = { Name = "fintel-ssmmessages-${var.env}" }
+}
+
+resource "aws_vpc_endpoint" "ec2messages" {
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.${var.aws_region}.ec2messages"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = aws_subnet.private[*].id
+  security_group_ids  = [aws_security_group.endpoints.id]
+  private_dns_enabled = true
+
+  tags = { Name = "fintel-ec2messages-${var.env}" }
+}
+
+# EC2 Instance Connect Endpoint — SSH to private instances without bastion or public IP.
+# Usage: aws ec2-instance-connect ssh --instance-id <id> --region <region> --os-user ubuntu
+resource "aws_ec2_instance_connect_endpoint" "main" {
+  subnet_id          = aws_subnet.private[0].id
+  security_group_ids = [aws_security_group.endpoints.id]
+  preserve_client_ip = false
+
+  tags = { Name = "fintel-eic-${var.env}" }
 }

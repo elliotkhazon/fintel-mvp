@@ -72,15 +72,15 @@ Earnings Transcripts (JSON)
 | Layer | Technology |
 |---|---|
 | Web framework | FastAPI + Uvicorn (async) |
-| Graph database | SurrealDB 2.0 (WebSocket async) |
+| Graph database | SurrealDB v3 (WebSocket async; `surrealkv://` storage backend) |
 | Agent orchestration | LangGraph + LangChain |
 | LLM | Google Gemini 2.5 Flash |
 | NLP | FinBERT (sentiment), spaCy (NER), sentence-transformers (embeddings) |
 | Statistical models | hmmlearn (Hidden Markov Model — regime classification) |
-| Cloud | AWS (VPC, S3, ECR, Secrets Manager, IAM) |
+| Cloud | AWS (VPC, NAT Gateway, S3, ECR, Secrets Manager, IAM) |
 | Infrastructure-as-code | Terraform 1.8 |
 | CI/CD | GitHub Actions + OIDC (no static keys) |
-| Container runtime | k3s (cloud), Docker Desktop (local) |
+| Container runtime | k3s on EC2 (cloud); Docker Desktop (local dev) |
 | Python | 3.11 |
 
 ---
@@ -103,17 +103,23 @@ fintel/mvp/
 │   └── evaluation_framework/ # Backtesting methodology and validation gates
 ├── eval/                     # Backtesting evaluation framework
 ├── infra/
-│   ├── main.tf               # Root Terraform config (networking + storage + IAM)
+│   ├── main.tf               # Root Terraform config (networking + storage + IAM + k3s)
 │   ├── variables.tf
 │   ├── outputs.tf
 │   ├── backend.tf            # Remote state (S3 + DynamoDB lock)
 │   ├── modules/
-│   │   ├── networking/       # VPC, private subnets, security groups, VPC endpoints
+│   │   ├── networking/       # VPC, NAT Gateway, subnets, security groups, VPC endpoints
 │   │   ├── storage/          # S3 buckets, ECR, Secrets Manager
-│   │   └── iam/              # GitHub OIDC provider, CI roles
+│   │   ├── iam/              # GitHub OIDC provider, CI roles, EC2 role
+│   │   └── k3s/              # EC2 instance, EBS volume, user_data bootstrap
+│   ├── k8s/                  # Kubernetes manifests (SurrealDB PV/PVC/Deployment, FastAPI Deployment/Service)
 │   ├── deploy.ps1 / deploy.sh
 │   ├── destroy.ps1 / destroy.sh
 │   ├── recreate.ps1 / recreate.sh
+│   ├── start_ssm.ps1         # Start SSM Session Manager to the k3s instance (PowerShell)
+│   ├── start_ssm.bat         # Start SSM Session Manager to the k3s instance (Batch)
+│   ├── diagnose_fastapi.py   # Pull FastAPI/SurrealDB pod logs and HTTP response via SSM
+│   ├── get_console.py        # Fetch EC2 serial console output (user_data bootstrap log)
 │   └── RUNBOOK.md            # Step-by-step deployment guide
 ├── models/
 │   └── hmm_regime.pkl        # Trained HMM regime classifier
@@ -387,11 +393,14 @@ Results are persisted to SurrealDB (`BacktestRun`) and can be explored interacti
 
 ### Prerequisites
 
-| Tool | Version |
-|---|---|
-| Python | 3.11 |
-| Docker Desktop | latest |
-| SurrealDB | v2.0+ |
+| Tool | Version | Required for |
+|---|---|---|
+| Python | 3.11 | Local dev + scripts |
+| Docker Desktop | latest | Local dev (SurrealDB) |
+| SurrealDB | v3 | Local dev only — cloud uses k3s |
+| AWS CLI | v2 | Cloud deployment |
+| Terraform | 1.8+ | Cloud deployment |
+| AWS Session Manager plugin | latest | SSM access to k3s node |
 
 ### Local setup
 
@@ -403,9 +412,10 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env — set GOOGLE_API_KEY, SURREAL_* credentials
 
-# 3. Start SurrealDB (Docker)
-docker run --rm -p 8000:8000 surrealdb/surrealdb:latest \
-  start --log trace --user root --pass root memory
+# 3. Start SurrealDB v3 (Docker)
+docker run --rm -p 8000:8000 \
+  -e SURREAL_USER=root -e SURREAL_PASS=root \
+  surrealdb/surrealdb:latest start --log info memory
 
 # 4. Apply the schema
 python -m src.db.init_schema
@@ -565,6 +575,8 @@ The test suite is divided into four tiers. Tests are gated per environment.
 | Integration | `tests/integration/` | Deployed AWS stack (`FINTEL_ENV=staging`) | Post-deploy (deploy-staging.yml) |
 | Regression | `tests/regression/` | Deployed stack | Post-deploy (deploy-staging.yml) |
 
+The integration suite covers Phase 0 (S3, Secrets Manager, ECR, VPC endpoints) and Phase 3 smoke tests (ECR image tagged `:fastapi`, FastAPI deployment ready, `/health` 200, `/v1/graph/signals` returns a bundle). All 17 tests must pass before a staging deploy is considered complete.
+
 ```bash
 # Unit tests (no dependencies)
 pytest tests/unit/ -v
@@ -573,9 +585,8 @@ pytest tests/unit/ -v
 pytest tests/unit/ tests/functional/ -v --tb=short
 
 # Integration tests (requires deployed staging stack)
-export FINTEL_ENV=staging
-export AWS_PROFILE=fintel-staging
-pytest tests/integration/ -v
+$env:FINTEL_ENV = "staging"
+python -m pytest tests/integration/ -v
 
 # Smoke tests only (prod deploy gate)
 pytest tests/integration/ -m smoke -v
@@ -585,18 +596,28 @@ pytest tests/integration/ -m smoke -v
 
 ## Infrastructure & Deployment
 
-AWS infrastructure is provisioned by Terraform (Phase 0). All resources are tagged by
-environment (`staging` / `prod`).
+AWS infrastructure is provisioned by Terraform across three phases. All resources are tagged by environment (`staging` / `prod`).
 
-### Provisioned resources (Phase 0)
+### Provisioned resources
 
-| Module | Resources |
-|---|---|
-| **Networking** | VPC (10.0.0.0/16), 2 private subnets, security groups, VPC endpoints (S3, ECR, Secrets Manager, CloudWatch) |
-| **Storage** | S3 buckets (transcripts, artifacts, glue scripts), ECR repository, Secrets Manager secrets |
-| **IAM** | GitHub OIDC provider, CI roles for staging and prod (no static keys) |
+| Phase | Module | Resources |
+|---|---|---|
+| 0 | **Networking** | VPC (10.0.0.0/16), public subnet + NAT Gateway, 2 private subnets, security groups, VPC endpoints (S3, ECR, Secrets Manager, CloudWatch, SSM) |
+| 0 | **Storage** | S3 buckets (transcripts, artifacts, glue scripts), ECR repository (`fintel-mvp`), Secrets Manager secrets |
+| 0 | **IAM** | GitHub OIDC provider, CI roles (no static keys), EC2 instance role |
+| 2 | **k3s** | EC2 t3.medium (Ubuntu 22.04), EBS gp3 20 GB data volume, SurrealDB Deployment on k3s (`:surrealdb` ECR image) |
+| 3 | **FastAPI** | FastAPI Deployment on k3s (`:fastapi` ECR image, 2 replicas), ClusterIP Service |
 
 ### Deploy to staging
+
+`deploy.ps1` runs 6 steps:
+
+1. Terraform init
+2. Terraform plan
+3. Terraform apply (provisions/updates all infrastructure)
+4. Push SurrealDB image to ECR (skipped if already present)
+5. Build + push FastAPI image to ECR (always rebuilds)
+6. Deploy FastAPI manifests to k3s via SSM Run Command
 
 ```bash
 # Bash
@@ -638,6 +659,40 @@ Workflows are disabled by default. Enable via **GitHub → Settings → Variable
 .\infra\destroy.ps1 -Env staging    # destroys compute/network, preserves S3 data
 .\infra\recreate.ps1 -Env staging   # full rebuild from scratch
 ```
+
+### SSM access to k3s node
+
+The k3s EC2 instance has no public IP. Use AWS Session Manager (requires the [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)):
+
+```powershell
+# PowerShell
+.\infra\start_ssm.ps1
+
+# Batch
+infra\start_ssm.bat
+```
+
+Both scripts resolve the current instance ID from `terraform output` automatically. Inside the session:
+
+```bash
+# Bootstrap progress
+tail -f /var/log/user_data.log
+
+# Pod status
+kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml get pods
+```
+
+### Diagnostic scripts
+
+```powershell
+# FastAPI pod logs, HTTP response, SurrealDB logs, pod status
+python infra/diagnose_fastapi.py
+
+# EC2 serial console output (user_data bootstrap log)
+python infra/get_console.py
+```
+
+Both scripts resolve the instance ID dynamically from `terraform output` — no hardcoding needed.
 
 ### CI/CD pipeline
 

@@ -1,0 +1,65 @@
+# Phase 3: FastAPI on k3s — internal only, no ALB.
+# Image placeholder FASTAPI_IMAGE is substituted by deploy.ps1 before kubectl apply.
+# SurrealDB is reached via ClusterIP DNS (no EC2 IP needed in the manifest).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi
+  labels:
+    app: fastapi
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fastapi
+  template:
+    metadata:
+      labels:
+        app: fastapi
+    spec:
+      imagePullSecrets:
+      - name: ecr-creds
+      containers:
+      - name: fastapi
+        image: FASTAPI_IMAGE
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        env:
+        - name: SURREAL_URL
+          value: "ws://surrealdb.default.svc.cluster.local:8000/rpc"
+        - name: SURREAL_USER
+          valueFrom:
+            secretKeyRef:
+              name: surrealdb-creds
+              key: user
+        - name: SURREAL_PASS
+          valueFrom:
+            secretKeyRef:
+              name: surrealdb-creds
+              key: pass
+        - name: SURREAL_NS
+          value: fintel
+        - name: SURREAL_DB
+          value: earnings_model
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 6
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          failureThreshold: 3

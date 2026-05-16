@@ -1,3 +1,4 @@
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -15,11 +16,16 @@ DATA_DIR = Path(__file__).parent.parent.parent / "data" / "transcripts"
 async def lifespan(app: FastAPI):
     from src.db.connection import get_db, close_db
     from src.db.init_schema import init_schema
-    try:
-        await get_db()
-        await init_schema()
-    except Exception as exc:
-        print(f"[WARN] SurrealDB unavailable at startup: {exc}. Graph endpoints will fail until DB is running.")
+    for attempt in range(10):
+        try:
+            await get_db()
+            await init_schema()
+            break
+        except Exception as exc:
+            print(f"[WARN] SurrealDB unavailable (attempt {attempt + 1}/10): {exc}. Retrying in 5s...")
+            await asyncio.sleep(5)
+    else:
+        print("[WARN] SurrealDB still unavailable after retries. Graph endpoints will fail.")
     yield
     await close_db()
 

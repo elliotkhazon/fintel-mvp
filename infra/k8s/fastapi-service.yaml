@@ -1,0 +1,15 @@
+# ClusterIP — FastAPI reachable inside k3s only.
+# DNS: fastapi.default.svc.cluster.local:8000
+# AgentCore reaches FastAPI via this ClusterIP (both run inside the VPC).
+apiVersion: v1
+kind: Service
+metadata:
+  name: fastapi
+spec:
+  selector:
+    app: fastapi
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 8000
+  type: ClusterIP
